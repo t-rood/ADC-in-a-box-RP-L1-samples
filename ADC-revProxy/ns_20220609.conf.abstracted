@@ -1,0 +1,198 @@
+# ADC base configuration (IP, routes, VLAN) required
+# ADC target version 13.1
+#
+# backend IP/server entities and bindings to vservers manually required (DNS, demo application server)
+#
+# Placeholders:
+# <#%%secretkey%%#> = google reCaptcha secret key
+# <#%%siteKey%%#> = google reCaptcha site key
+# <#%%cert_public%%#> = SSL wildcard public key filename
+# <#%%cert_private%%#> = SSL wildcard private key filename
+# <#%%cert_password%%#> = SSL wildcard private key passphrase
+# <#%%subCA_public%%#> = SSL issuing CA public key filename
+# <#%%webappFQDN%%#> = (public) hostname for demo application
+# <#%%webappName%%#> = logical name for demo application (short_ASCII_only)
+# <#%%VIPaddress%%#> = hosting VIP on ADC for vserver(s)
+#
+# actually this is NOT a batch commmand but just the extracted sanitized running ns.conf. batchmode requires a little more work to succeed. ;-)
+#
+enable ns feature LB CS SSL AAA REWRITE RESPONDER
+enable ns mode FR CKA TCPB Edge USNIP PMTUD
+set ssl parameter -defaultProfile ENABLED
+add policy patset AEPS_<#%%webappName%%#>_structure
+add policy patset AEPS_<#%%webappName%%#>_filetypes
+add policy patset AEPS_<#%%webappName%%#>_methods
+bind policy patset AEPS_<#%%webappName%%#>_structure "/styles/" -index 1
+bind policy patset AEPS_<#%%webappName%%#>_structure "/images/" -index 2
+bind policy patset AEPS_<#%%webappName%%#>_structure "/content/" -index 3
+bind policy patset AEPS_<#%%webappName%%#>_structure "/login/" -index 4
+bind policy patset AEPS_<#%%webappName%%#>_filetypes js -index 3
+bind policy patset AEPS_<#%%webappName%%#>_filetypes png -index 1
+bind policy patset AEPS_<#%%webappName%%#>_filetypes css -index 2
+bind policy patset AEPS_<#%%webappName%%#>_filetypes html -index 4
+bind policy patset AEPS_<#%%webappName%%#>_filetypes aspx -index 5
+bind policy patset AEPS_<#%%webappName%%#>_methods OPTIONS -index 1
+bind policy patset AEPS_<#%%webappName%%#>_methods POST -index 2
+bind policy patset AEPS_<#%%webappName%%#>_methods GET -index 3
+add policy expression AEA_FQDN_<#%%webappName%%#> "\"<#%%webappFQDN%%#>\""
+add policy expression AEA_STSHeader_MaxAge "\"max-age=157680000\""
+add policy expression AEA_HTML_ReloadBodyTag q|"<script language=\"javascript\" type=\"text/javascript\">function ReloadPage() { document.location.reload(); } function ReloadPageDelayed() { setTimeout(\"ReloadPage()\", 2000); } </script><body onload=\"ReloadPageDelayed()\">"|
+add policy expression AEA_Style_Fonts "\"<style>body { font-size: 20px; font-family: arial, sans-serif; } </style>\""
+add policy expression AEA_Feature_AnonymizeServerDetails_isEnabled true
+add policy expression AEA_Feature_RateLimiting_isEnabled true
+add policy expression AEA_Feature_Captcha_isEnabled true
+add policy expression AEA_Feature_LimitQueries_isEnabled true
+add policy expression AEA_Feature_LimitPayload_isEnabled true
+add policy expression AEA_Feature_ApplicationLevelFiltering_isEnabled true
+add policy expression AEA_Feature_ApplicationLevelFilteringLogging_isEnabled true
+add policy expression AEA_backend_matches_ApplicationLevelFilter_Type1 "HTTP.REQ.METHOD.EQUALS_ANY(\"AEPS_<#%%webappName%%#>_methods\") && (HTTP.REQ.URL.PATH.SET_TEXT_MODE(IGNORECASE).EQUALS_ANY(\"AEPS_<#%%webappName%%#>_structure\") || HTTP.REQ.URL.PATH.APPEND(\"/\").SET_TEXT_MODE(IGNORECASE).EQUALS_ANY(\"AEPS_<#%%webappName%%#>_structure\") || (HTTP.REQ.URL.PATH.APPEND(\"/\").SET_TEXT_MODE(IGNORECASE).STARTSWITH_ANY(\"AEPS_<#%%webappName%%#>_structure\") && HTTP.REQ.URL.PATH.AFTER_STR(\".\").SET_TEXT_MODE(IGNORECASE).ENDSWITH_ANY(\"AEPS_<#%%webappName%%#>_filetypes\")))"
+add policy expression AEA_Feature_Drop4xx_isEnabled true
+add policy expression AEA_Feature_Drop5xx_isEnabled true
+add policy expression AEA_Feature_SNI_isEnabled true
+add ssl profile SPRSF_TLS12_TLS13 -dhCount 1000 -dh ENABLED -dhFile "/nsconfig/ssl/dh2048.key" -eRSA DISABLED -sessReuse ENABLED -sessTimeout 120 -tls1 DISABLED -tls11 DISABLED -tls13 ENABLED -denySSLReneg NONSECURE -HSTS ENABLED -maxage 157680000
+add ssl profile SPRSF_TLS12_TLS13_SNI -dhCount 1000 -dh ENABLED -dhFile "/nsconfig/ssl/dh2048.key" -eRSA DISABLED -sessReuse ENABLED -sessTimeout 120 -tls1 DISABLED -tls11 DISABLED -tls13 ENABLED -SNIEnable ENABLED -denySSLReneg NONSECURE -HSTS ENABLED -maxage 157680000
+add ns limitIdentifier ARI_ClientIP_maxPerSlice -timeSlice 5000 -selectorName ARS_Client_SrcIP
+add ns limitIdentifier ARI_ClientIP_maxPerSliceBruteForce -threshold 3 -timeSlice 5000 -selectorName ARS_Client_SrcIP
+add audit messageaction SAMA_Protection_LargeQuery WARNING "\"ADC-Protection: large query detected at \" + HTTP.REQ.HOSTNAME.SERVER.HTTP_HEADER_SAFE + HTTP.REQ.URL.PATH.HTTP_URL_SAFE + \" (source: \" + CLIENT.IP.SRC.TYPECAST_TEXT_T + \")\"" -logtoNewnslog YES
+add audit messageaction SAMA_Protection_LargePayload WARNING "\"ADC-Protection: large payload detected at \" + HTTP.REQ.HOSTNAME.SERVER.HTTP_HEADER_SAFE + HTTP.REQ.URL.PATH.HTTP_URL_SAFE + \" (source: \" + CLIENT.IP.SRC.TYPECAST_TEXT_T + \")\"" -logtoNewnslog YES
+add audit messageaction SAMA_Protection_RateLimiting_HardLimit WARNING "\"ADC-Protection: rate limiting hard limit reached at \" + HTTP.REQ.HOSTNAME.SERVER.HTTP_HEADER_SAFE + HTTP.REQ.URL.PATH.HTTP_URL_SAFE + \" (source: \" + CLIENT.IP.SRC.TYPECAST_TEXT_T + \")\"" -logtoNewnslog YES
+add audit messageaction SAMA_Protection_RateLimiting_SoftLimit WARNING "\"ADC-Protection: rate limiting soft limit reached at \" + HTTP.REQ.HOSTNAME.SERVER.HTTP_HEADER_SAFE + HTTP.REQ.URL.PATH.HTTP_URL_SAFE + \" (source: \" + CLIENT.IP.SRC.TYPECAST_TEXT_T + \")\"" -logtoNewnslog YES
+add audit messageaction SAMA_Protection_LogInvalidAccess WARNING "\"ADC-Protection: invalid access pattern \" + HTTP.REQ.HOSTNAME.SERVER.HTTP_HEADER_SAFE + HTTP.REQ.URL.PATH.HTTP_URL_SAFE + \" (source: \" + CLIENT.IP.SRC.TYPECAST_TEXT_T + \")\"" -logtoNewnslog YES
+add audit messageaction SAMA_Protection_Error5xxSuppressed WARNING "\"ADC-Protection: dropped server error response when processing \" + HTTP.REQ.HOSTNAME.SERVER.HTTP_HEADER_SAFE + HTTP.REQ.URL.PATH.HTTP_URL_SAFE + \" (source: \" + CLIENT.IP.SRC.TYPECAST_TEXT_T + \")\"" -logtoNewnslog YES
+add serviceGroup LSG_backend HTTP -maxClient 0 -maxReq 0 -cip DISABLED -usip NO -useproxyport YES -cltTimeout 180 -svrTimeout 360 -CKA YES -TCPB YES -CMP NO
+add serviceGroup LSG_DNS DNS -maxClient 0 -maxReq 0 -cip DISABLED -usip NO -useproxyport NO -cltTimeout 120 -svrTimeout 120 -CKA YES -TCPB YES -CMP NO
+add authentication captchaAction AUTHS_captcha -serverURL "https://www.google.com/recaptcha/api/siteverify" -secretKey <#%%secretkey%%#> -siteKey <#%%siteKey%%#> 
+add ssl certKey Wildcard -cert <#%%cert_public%%#> -key <#%%cert_private%%#> <#%%cert_password%%#>
+add ssl certKey bcLAB-SubCA -cert <#%%subCA_public%%#>
+link ssl certKey Wildcard bcLAB-SubCA
+add authentication authnProfile APR_<#%%webappName%%#> -authnVsName AVS_protection -AuthenticationHost <#%%webappFQDN%%#>
+add authentication loginSchema ALSPR_OnlyCaptcha -authenticationSchema "/nsconfig/loginschema/OnlyCaptcha.xml"
+add authentication loginSchema ALSPR_UserID_ClientIP_Time -authenticationSchema noschema -userExpression "CLIENT.IP.SRC.TYPECAST_TEXT_T + \"-\" + SYS.TIME" -SSOCredentials YES
+add vpn portaltheme NPT_bcRfWebUI -basetheme RfWebUI
+add authentication loginSchemaPolicy ALSP_OnlyCaptcha -rule true -action ALSPR_OnlyCaptcha
+add authorization policy AAAP_<#%%webappName%%#> "HTTP.REQ.HOSTNAME.SERVER == AEA_FQDN_<#%%webappName%%#>" ALLOW
+add lb vserver LVS_backend_AAAenabled HTTP 0.0.0.0 0 -persistenceType NONE -cltTimeout 180 -Authentication ON -authnProfile APR_<#%%webappName%%#>
+add lb vserver LVS_DNS DNS 0.0.0.0 0 -persistenceType NONE -cltTimeout 120
+add lb vserver LVS_backend HTTP 0.0.0.0 0 -persistenceType NONE -cltTimeout 180
+add lb vserver LVS_DeadEndRoad_Logging HTTP 0.0.0.0 0 -persistenceType NONE -cltTimeout 180
+add lb vserver LVS_DeadEndRoad HTTP 0.0.0.0 0 -persistenceType NONE -cltTimeout 180
+add authentication vserver AVS_protection SSL 0.0.0.0
+add cs vserver CVS_vip_AAA SSL <#%%VIPaddress%%#> 443 -cltTimeout 180 -Listenpolicy AEA_Feature_Captcha_isEnabled -Listenpriority 10 -persistenceType NONE
+add cs vserver CVS_vip SSL <#%%VIPaddress%%#> 443 -cltTimeout 180 -persistenceType NONE
+add cs vserver CVS_vip_nonSNI SSL <#%%VIPaddress%%#> 443 -cltTimeout 180 -Listenpolicy "!AEA_Feature_SNI_isEnabled" -Listenpriority 1 -persistenceType NONE
+add cs action CA_AVS -targetVserver AVS_protection
+add cs action CA_DeadEndRoad_Logging -targetLBVserver LVS_DeadEndRoad_Logging
+add cs policy CP_URI_backend_allowAnyURI_AAAenabled -rule "!AEA_Feature_ApplicationLevelFiltering_isEnabled"
+add cs policy CP_FQDN_<#%%webappName%%#>_AAAenabled -rule "HTTP.REQ.HOSTNAME.SERVER == AEA_FQDN_<#%%webappName%%#>"
+add cs policy CP_FQDN_<#%%webappName%%#>_URI_isAAA -rule "(HTTP.REQ.HOSTNAME.SERVER == AEA_FQDN_<#%%webappName%%#>) && (is_vpn_url && !HTTP.REQ.URL.EQ(\"/\"))" -action CA_AVS
+add cs policy CP_FQDN_<#%%webappName%%#> -rule "HTTP.REQ.HOSTNAME.SERVER == AEA_FQDN_<#%%webappName%%#>"
+add cs policy CP_URI_backend_allowAnyURI -rule "!AEA_Feature_ApplicationLevelFiltering_isEnabled"
+add cs policy CP_DeadEndRoad_Logging -rule AEA_Feature_ApplicationLevelFilteringLogging_isEnabled -action CA_DeadEndRoad_Logging
+add cs policy CP_URI_backend_isApplicationLevelURI_AAAenabled -rule "HTTP.REQ.URL.EQ(\"/\") || HTTP.REQ.URL.EQ(\"/favicon.ico\") || AEA_backend_matches_ApplicationLevelFilter_Type1"
+add cs policy CP_URI_backend_isApplicationLevelURI -rule "HTTP.REQ.URL.EQ(\"/\") || HTTP.REQ.URL.EQ(\"/favicon.ico\")  || AEA_backend_matches_ApplicationLevelFilter_Type1"
+add cs policylabel CPL_backend_AAAenabled HTTP
+add cs policylabel CPL_backend HTTP
+bind cs policylabel CPL_backend_AAAenabled CP_URI_backend_isApplicationLevelURI_AAAenabled 100 -targetVserver LVS_backend_AAAenabled
+bind cs policylabel CPL_backend_AAAenabled CP_URI_backend_allowAnyURI_AAAenabled 888 -targetVserver LVS_backend_AAAenabled
+bind cs policylabel CPL_backend_AAAenabled CP_DeadEndRoad_Logging 999
+bind cs policylabel CPL_backend CP_URI_backend_isApplicationLevelURI 100 -targetVserver LVS_backend
+bind cs policylabel CPL_backend CP_URI_backend_allowAnyURI 888 -targetVserver LVS_backend
+bind cs policylabel CPL_backend CP_DeadEndRoad_Logging 999
+set aaa parameter -enableStaticPageCaching NO -maxAAAUsers 4294967295
+add rewrite action RWA_RES_AutoSubmitCaptcha replace "HTTP.RES.BODY(20000).SUBSTR(\"enableFormsButton($loginButton);\").AFTER_STR(\";\")" q/"$loginButton.trigger(\"click\");"/
+add rewrite action RWA_RES_RemoveHeader_X-Powered-By delete_http_header X-Powered-By
+add rewrite action RWA_RES_RemoveHeader_X-AspNet-Version delete_http_header X-AspNet-Version
+add rewrite action RWA_RES_ChangeHeader_Server replace "HTTP.RES.HEADER(\"Server\")" "\"JustAnotherWebserver/2022.01\""
+add rewrite action RWA_REQ_InvalidateQuery delete HTTP.REQ.URL.QUERY
+add rewrite action RWA_RES_OverrideWith404 replace_http_res q{"HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nStrict-Transport-Security: " + AEA_STSHeader_MaxAge + "\r\n\r\n<html><head><meta http-equiv=\"expires\" content=\"0\"><title>404</title></head>" + AEA_Style_Fonts + "<body><p>content not found</p></body></html>"}
+add rewrite policy RWP_RES_AutoSubmitCaptcha "(HTTP.REQ.HOSTNAME.SERVER == AEA_FQDN_<#%%webappName%%#>) && HTTP.REQ.URL.PATH.EQ(\"/logon/LogonPoint/plugins/ns-gateway/ns-nfactor.js\") && HTTP.RES.BODY(20000).CONTAINS(\"enableFormsButton($loginButton);\")" RWA_RES_AutoSubmitCaptcha
+add rewrite policy RWP_RES_ChangeHeader_Server "HTTP.RES.HEADER(\"Server\").EXISTS" RWA_RES_ChangeHeader_Server
+add rewrite policy RWP_RES_RemoveHeader_X-AspNet-Version "HTTP.RES.HEADER(\"X-AspNet-Version\").EXISTS" RWA_RES_RemoveHeader_X-AspNet-Version
+add rewrite policy RWP_RES_RemoveHeader_X-Powered-By "HTTP.RES.HEADER(\"X-Powered-By\").EXISTS" RWA_RES_RemoveHeader_X-Powered-By
+add rewrite policy RWP_RES_AnonymizeServerDetails AEA_Feature_AnonymizeServerDetails_isEnabled NOREWRITE
+add rewrite policy RWP_REQ_InvalidateQuery "AEA_Feature_LimitQueries_isEnabled && HTTP.REQ.URL.QUERY.LENGTH.GE(40)" RWA_REQ_InvalidateQuery -logAction SAMA_Protection_LargeQuery
+add rewrite policy RWP_RES_Override4xx "AEA_Feature_Drop4xx_isEnabled && HTTP.RES.STATUS.BETWEEN(400,499)" RWA_RES_OverrideWith404
+add rewrite policy RWP_RES_Drop5xx "AEA_Feature_Drop5xx_isEnabled && HTTP.RES.STATUS.BETWEEN(500,599)" DROP -logAction SAMA_Protection_Error5xxSuppressed
+add rewrite policylabel RWL_RES_AnonymizeServerDetails http_res
+bind rewrite policylabel RWL_RES_AnonymizeServerDetails RWP_RES_ChangeHeader_Server 100 NEXT
+bind rewrite policylabel RWL_RES_AnonymizeServerDetails RWP_RES_RemoveHeader_X-AspNet-Version 110 NEXT
+bind rewrite policylabel RWL_RES_AnonymizeServerDetails RWP_RES_RemoveHeader_X-Powered-By 120 NEXT
+bind rewrite global RWP_RES_AutoSubmitCaptcha 100 NEXT -type RES_OVERRIDE
+add responder action RPA_ReloadResponder respondwith q{"HTTP/1.1 200 OK\r\nStrict-Transport-Security: " + AEA_STSHeader_MaxAge + "\r\n\r\n<html><head><meta http-equiv=\"expires\" content=\"0\"><title>Login</title></head>" + AEA_Style_Fonts + AEA_HTML_ReloadBodyTag + "<p>processing...</p></body></html>"}
+add responder policy RPP_exceedsRateLimit "SYS.CHECK_LIMIT(\"ARI_ClientIP_maxPerSlice\") && !SYS.CHECK_LIMIT(\"ARI_ClientIP_maxPerSliceBruteForce\")" RPA_ReloadResponder -logAction SAMA_Protection_RateLimiting_SoftLimit
+add responder policy RPP_exceedsRateLimitBruteForce "SYS.CHECK_LIMIT(\"ARI_ClientIP_maxPerSliceBruteForce\")" DROP -logAction SAMA_Protection_RateLimiting_HardLimit
+add responder policy RPP_isLoginEvent "AEA_Feature_RateLimiting_isEnabled && HTTP.REQ.METHOD.EQ(POST) && HTTP.REQ.URL.PATH.GET(1).SET_TEXT_MODE(IGNORECASE).EQ(\"login\")" NOOP
+add responder policy RPP_isLargePayload "AEA_Feature_LimitPayload_isEnabled && HTTP.REQ.METHOD.EQ(POST) && HTTP.REQ.CONTENT_LENGTH.GE(100)" RESET -logAction SAMA_Protection_LargePayload
+add responder policy RPP_DeadEndRoad_Logging true RESET -logAction SAMA_Protection_LogInvalidAccess
+add responder policy RPP_DeadEndRoad true RESET
+add responder policylabel RPL_exceedsRateLimit
+bind responder policylabel RPL_exceedsRateLimit RPP_exceedsRateLimitBruteForce 100 END
+bind responder policylabel RPL_exceedsRateLimit RPP_exceedsRateLimit 110 END
+bind lb vserver LVS_DeadEndRoad_Logging LS_internal
+bind lb vserver LVS_DeadEndRoad LS_internal
+bind lb vserver LVS_backend_AAAenabled LSG_backend
+bind lb vserver LVS_backend LSG_backend
+bind lb vserver LVS_DNS LSG_DNS
+bind lb vserver LVS_backend_AAAenabled -policyName RWP_REQ_InvalidateQuery -priority 100 -gotoPriorityExpression NEXT -type REQUEST
+bind lb vserver LVS_backend_AAAenabled -policyName RWP_RES_Override4xx -priority 100 -gotoPriorityExpression END -type RESPONSE
+bind lb vserver LVS_backend_AAAenabled -policyName RWP_RES_Drop5xx -priority 110 -gotoPriorityExpression END -type RESPONSE
+bind lb vserver LVS_backend_AAAenabled -policyName RWP_RES_AnonymizeServerDetails -priority 200 -gotoPriorityExpression USE_INVOCATION_RESULT -type RESPONSE -invoke policylabel RWL_RES_AnonymizeServerDetails
+bind lb vserver LVS_backend -policyName RWP_REQ_InvalidateQuery -priority 100 -gotoPriorityExpression NEXT -type REQUEST
+bind lb vserver LVS_backend -policyName RWP_RES_Override4xx -priority 100 -gotoPriorityExpression END -type RESPONSE
+bind lb vserver LVS_backend -policyName RWP_RES_Drop5xx -priority 110 -gotoPriorityExpression END -type RESPONSE
+bind lb vserver LVS_backend -policyName RWP_RES_AnonymizeServerDetails -priority 200 -gotoPriorityExpression USE_INVOCATION_RESULT -type RESPONSE -invoke policylabel RWL_RES_AnonymizeServerDetails
+bind lb vserver LVS_backend_AAAenabled -policyName RPP_isLargePayload -priority 100 -gotoPriorityExpression END -type REQUEST
+bind lb vserver LVS_backend_AAAenabled -policyName RPP_isLoginEvent -priority 110 -gotoPriorityExpression USE_INVOCATION_RESULT -type REQUEST -invoke policylabel RPL_exceedsRateLimit
+bind lb vserver LVS_backend -policyName RPP_isLargePayload -priority 100 -gotoPriorityExpression END -type REQUEST
+bind lb vserver LVS_backend -policyName RPP_isLoginEvent -priority 110 -gotoPriorityExpression USE_INVOCATION_RESULT -type REQUEST -invoke policylabel RPL_exceedsRateLimit
+bind lb vserver LVS_DeadEndRoad_Logging -policyName RPP_DeadEndRoad_Logging -priority 100 -gotoPriorityExpression END -type REQUEST
+bind lb vserver LVS_DeadEndRoad -policyName RPP_DeadEndRoad -priority 100 -gotoPriorityExpression END -type REQUEST
+bind lb vserver LVS_backend_AAAenabled -policyName AAAP_<#%%webappName%%#> -priority 100 -gotoPriorityExpression END -type REQUEST
+bind cs vserver CVS_vip_AAA -policyName CP_FQDN_<#%%webappName%%#>_URI_isAAA -priority 1
+bind cs vserver CVS_vip_AAA -policyName CP_FQDN_<#%%webappName%%#>_AAAenabled -priority 100 -gotoPriorityExpression USE_INVOCATION_RESULT -invoke policylabel CPL_backend_AAAenabled
+bind cs vserver CVS_vip_AAA -lbvserver LVS_DeadEndRoad
+bind cs vserver CVS_vip -policyName CP_FQDN_<#%%webappName%%#> -priority 100 -gotoPriorityExpression USE_INVOCATION_RESULT -invoke policylabel CPL_backend
+bind cs vserver CVS_vip -lbvserver LVS_DeadEndRoad
+bind cs vserver CVS_vip_nonSNI -lbvserver LVS_backend
+add dns nameServer LVS_DNS
+add lb monitor LM_DNS_www.google.com DNS -query www.google.com -queryType Address -LRTM DISABLED
+bind serviceGroup LSG_DNS -monitorName LM_DNS_www.google.com
+set ssl vserver AVS_protection -sslProfile SPRSF_TLS12_TLS13
+set ssl vserver CVS_vip_AAA -sslProfile SPRSF_TLS12_TLS13_SNI
+set ssl vserver CVS_vip -sslProfile SPRSF_TLS12_TLS13_SNI
+set ssl vserver CVS_vip_nonSNI -sslProfile SPRSF_TLS12_TLS13
+add ssl policy SPL_FQDN -rule "CLIENT.SSL.CLIENT_HELLO.SNI != AEA_FQDN_<#%%webappName%%#>" -action RESET
+add authentication Policy AAP_captcha -rule true -action AUTHS_captcha
+add authentication Policy AAP_none -rule true -action NO_AUTHN
+add authentication policylabel AAPL_UserID_ClientIP_Time -loginSchema ALSPR_UserID_ClientIP_Time
+bind authentication policylabel AAPL_UserID_ClientIP_Time -policyName AAP_none -priority 100 -gotoPriorityExpression NEXT
+add tm sessionAction APR_Homepage -homePage "https://<#%%webappFQDN%%#>/"
+add tm sessionAction APR_SessionTime -sessTimeout 240
+add tm sessionPolicy AP_Homepage true APR_Homepage
+add tm sessionPolicy AP_SessionTime true APR_SessionTime
+set audit syslogParams -logLevel ALL -userDefinedAuditlog YES
+set audit nslogParams -logLevel ALL -userDefinedAuditlog YES
+bind authentication vserver AVS_protection -portaltheme NPT_bcRfWebUI
+bind authentication vserver AVS_protection -policy ALSP_OnlyCaptcha -priority 100 -gotoPriorityExpression END
+bind authentication vserver AVS_protection -policy AAP_captcha -priority 100 -nextFactor AAPL_UserID_ClientIP_Time -gotoPriorityExpression NEXT
+bind authentication vserver AVS_protection -policy AP_Homepage -priority 100 -gotoPriorityExpression NEXT
+add ssl cipher SCG_StrongCiphers_http13
+bind ssl cipher SCG_StrongCiphers_http13 -cipherName TLS1.3-AES256-GCM-SHA384 -cipherPriority 1
+bind ssl cipher SCG_StrongCiphers_http13 -cipherName TLS1.3-AES128-GCM-SHA256 -cipherPriority 2
+bind ssl cipher SCG_StrongCiphers_http13 -cipherName TLS1.3-CHACHA20-POLY1305-SHA256 -cipherPriority 3
+bind ssl cipher SCG_StrongCiphers_http13 -cipherName TLS1.2-ECDHE-RSA-AES256-GCM-SHA384 -cipherPriority 4
+bind ssl cipher SCG_StrongCiphers_http13 -cipherName TLS1.2-ECDHE-RSA-AES128-GCM-SHA256 -cipherPriority 8
+bind ssl cipher SCG_StrongCiphers_http13 -cipherName TLS1.2-DHE-RSA-AES256-GCM-SHA384 -cipherPriority 9
+bind ssl cipher SCG_StrongCiphers_http13 -cipherName TLS1.2-DHE-RSA-AES128-GCM-SHA256 -cipherPriority 10
+bind ssl profile SPRSF_TLS12_TLS13 -eccCurveName P_256
+bind ssl profile SPRSF_TLS12_TLS13 -eccCurveName P_384
+bind ssl profile SPRSF_TLS12_TLS13 -cipherName SCG_StrongCiphers_http13 -cipherPriority 1
+bind ssl profile SPRSF_TLS12_TLS13_SNI -eccCurveName P_256
+bind ssl profile SPRSF_TLS12_TLS13_SNI -eccCurveName P_384
+bind ssl profile SPRSF_TLS12_TLS13_SNI -cipherName SCG_StrongCiphers_http13 -cipherPriority 1
+bind ssl vserver AVS_protection -certkeyName Wildcard
+bind ssl vserver CVS_vip_AAA -certkeyName Wildcard -SNICert
+bind ssl vserver CVS_vip -certkeyName Wildcard -SNICert
+bind ssl vserver CVS_vip_nonSNI -certkeyName Wildcard
+bind ssl vserver CVS_vip_AAA -policyName SPL_FQDN -priority 100 -type CLIENTHELLO_REQ
+bind ssl vserver CVS_vip -policyName SPL_FQDN -priority 100

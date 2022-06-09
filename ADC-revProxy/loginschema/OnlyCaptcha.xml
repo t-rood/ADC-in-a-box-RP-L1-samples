@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<AuthenticateResponse xmlns="http://citrix.com/authentication/response/1">
+<Status>success</Status>
+<Result>more-info</Result>
+<StateContext/>
+<AuthenticationRequirements>
+<PostBack>/nf/auth/doAuthentication.do</PostBack>
+<CancelPostBack>/nf/auth/doLogoff.do</CancelPostBack>
+<CancelButtonText>Cancel</CancelButtonText>
+<Requirements>
+<Requirement><Credential><ID>nf-recaptcha</ID><Type>nf-recaptcha</Type></Credential></Requirement>
+<Requirement><Credential><ID>loginBtn</ID><Type>none</Type></Credential><Label><Type>none</Type></Label><Input><Button>singleauthcaptcha_log_on</Button></Input></Requirement>
+</Requirements>
+</AuthenticationRequirements>
+</AuthenticateResponse>
